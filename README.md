@@ -49,6 +49,23 @@ An MCP server for managing Google Calendar events using service account authenti
 - `gcal_update_event` - Update an existing event
 - `gcal_delete_event` - Delete an event
 
+### Mailchimp MCP Server
+
+Located in `mailchimp-mcp-server/`
+
+An MCP server for managing Mailchimp email campaigns.
+
+**Tools provided:**
+- `mailchimp_list_audiences` - List audiences to get list_id
+- `mailchimp_list_campaigns` - List existing campaigns
+- `mailchimp_get_campaign` - Get campaign details
+- `mailchimp_create_campaign` - Create a new campaign
+- `mailchimp_set_content` - Set HTML/template content for a campaign
+- `mailchimp_send_test` - Send a test email
+- `mailchimp_send_campaign` - Send campaign to full audience
+- `mailchimp_upload_image` - Upload image to File Manager
+- `mailchimp_list_files` - List files in File Manager
+
 ## Setup
 
 ### Discord MCP Server
@@ -117,6 +134,38 @@ An MCP server for managing Google Calendar events using service account authenti
 - `GOOGLE_SERVICE_ACCOUNT_KEY_PATH` - Path to the service account JSON key file
 - `GOOGLE_SERVICE_ACCOUNT_KEY` - Alternative: JSON content directly (useful for CI/CD)
 - `GOOGLE_CALENDAR_ID` - Calendar ID to use (defaults to "primary")
+
+### Mailchimp MCP Server
+
+1. Log into Mailchimp at https://mailchimp.com
+2. Go to **Account > Extras > API keys**
+3. Click "Create A Key" and copy the key (format: `abc123xyz-us6`)
+
+4. Build the server:
+   ```bash
+   cd mailchimp-mcp-server
+   npm install
+   npm run build
+   ```
+
+5. Configure in `.mcp.json`:
+   ```json
+   {
+     "mcpServers": {
+       "mailchimp": {
+         "command": "node",
+         "args": ["mailchimp-mcp-server/dist/index.js"],
+         "env": {
+           "MAILCHIMP_API_KEY": "your-api-key-us6"
+         }
+       }
+     }
+   }
+   ```
+
+**Environment Variables:**
+- `MAILCHIMP_API_KEY` - Your Mailchimp API key (includes data center suffix, e.g., `abc123-us6`)
+
 
 ### Wix MCP
 
