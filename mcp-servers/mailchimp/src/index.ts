@@ -11,6 +11,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import axios, { AxiosError } from "axios";
 import { z } from "zod";
+import * as fs from "fs";
+import * as path from "path";
 
 // Environment variables
 const MAILCHIMP_API_KEY = process.env.MAILCHIMP_API_KEY;
@@ -73,6 +75,23 @@ interface MailchimpFile {
   full_size_url: string;
   type: string;
   size: number;
+}
+
+interface MailchimpTemplate {
+  id: string;
+  type: string;
+  name: string;
+  drag_and_drop: boolean;
+  responsive: boolean;
+  category: string;
+  date_created: string;
+  date_edited: string;
+  created_by: string;
+  edited_by: string;
+  active: boolean;
+  folder_id?: string;
+  thumbnail?: string;
+  share_url?: string;
 }
 
 /**
@@ -277,10 +296,13 @@ const SendCampaignSchema = z
 
 const UploadImageSchema = z
   .object({
-    name: z.string().describe("Filename for the image (e.g., 'header.png')"),
-    file_data: z
+    image_path: z
       .string()
-      .describe("Base64-encoded image data (PNG, JPG, GIF, or BMP, max 1MB)"),
+      .describe("File path to the image (PNG, JPG, GIF, or BMP, max 1MB). Server will read and encode it."),
+    name: z
+      .string()
+      .optional()
+      .describe("Optional filename override. If not provided, uses the original filename from image_path."),
     folder_id: z
       .number()
       .int()
@@ -298,6 +320,104 @@ const ListFilesSchema = z
       .max(1000)
       .default(25)
       .describe("Number of files to return (default: 25)"),
+  })
+  .strict();
+
+const GetContentSchema = z
+  .object({
+    campaign_id: z.string().describe("The unique ID of the campaign"),
+  })
+  .strict();
+
+const DeleteCampaignSchema = z
+  .object({
+    campaign_id: z.string().describe("The unique ID of the campaign to delete"),
+  })
+  .strict();
+
+const ScheduleCampaignSchema = z
+  .object({
+    campaign_id: z.string().describe("The unique ID of the campaign to schedule"),
+    schedule_time: z
+      .string()
+      .describe(
+        "The UTC date and time to schedule the campaign in ISO 8601 format (e.g., '2025-02-15T18:00:00+00:00')"
+      ),
+    timewarp: z
+      .boolean()
+      .optional()
+      .describe("Send campaign based on subscriber's timezone (requires paid plan)"),
+    batch_delivery: z
+      .object({
+        batch_delay: z.number().int().min(1).max(24).describe("Delay between batches in hours (1-24)"),
+        batch_count: z.number().int().min(2).max(26).describe("Number of batches (2-26)"),
+      })
+      .optional()
+      .describe("Spread delivery over multiple batches"),
+  })
+  .strict();
+
+const UnscheduleCampaignSchema = z
+  .object({
+    campaign_id: z.string().describe("The unique ID of the scheduled campaign to unschedule"),
+  })
+  .strict();
+
+const ListTemplatesSchema = z
+  .object({
+    count: z
+      .number()
+      .int()
+      .min(1)
+      .max(1000)
+      .default(20)
+      .describe("Number of templates to return (default: 20)"),
+    type: z
+      .enum(["user", "base", "gallery"])
+      .optional()
+      .describe("Filter by template type: 'user' (custom), 'base' (Mailchimp basics), 'gallery' (pre-designed)"),
+    folder_id: z
+      .string()
+      .optional()
+      .describe("Filter by folder ID"),
+  })
+  .strict();
+
+const GetTemplateSchema = z
+  .object({
+    template_id: z.string().describe("The unique ID of the template"),
+  })
+  .strict();
+
+const CreateTemplateSchema = z
+  .object({
+    name: z.string().max(100).describe("The name of the template (max 100 characters)"),
+    html: z.string().describe("The raw HTML for the template. Must include Mailchimp merge tags for unsubscribe link."),
+    folder_id: z
+      .string()
+      .optional()
+      .describe("Optional folder ID to organize the template"),
+  })
+  .strict();
+
+const UpdateTemplateSchema = z
+  .object({
+    template_id: z.string().describe("The unique ID of the template to update"),
+    name: z.string().max(100).optional().describe("New name for the template"),
+    html: z.string().optional().describe("New HTML content for the template"),
+    folder_id: z.string().optional().describe("Move template to a different folder"),
+  })
+  .strict();
+
+const DeleteTemplateSchema = z
+  .object({
+    template_id: z.string().describe("The unique ID of the template to delete"),
+  })
+  .strict();
+
+const GetTemplateDefaultContentSchema = z
+  .object({
+    template_id: z.string().describe("The unique ID of the template"),
   })
   .strict();
 
@@ -677,8 +797,8 @@ server.registerTool(
     title: "Upload Image to File Manager",
     description: `Upload an image to Mailchimp's File Manager.
 
-The image must be base64-encoded. Supported formats: PNG, JPG, GIF, BMP.
-Maximum file size: 1MB.
+Provide a local file path and the server will read and encode the image.
+Supported formats: PNG, JPG, GIF, BMP. Maximum file size: 1MB.
 
 Returns the full URL of the uploaded image, which you can use in campaign HTML content.`,
     inputSchema: UploadImageSchema,
@@ -691,9 +811,54 @@ Returns the full URL of the uploaded image, which you can use in campaign HTML c
   },
   async (params) => {
     try {
+      // Validate file exists
+      if (!fs.existsSync(params.image_path)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: File not found at path: ${params.image_path}`,
+            },
+          ],
+        };
+      }
+
+      // Read and encode the file
+      const fileBuffer = fs.readFileSync(params.image_path);
+      const fileSizeInBytes = fileBuffer.length;
+      const maxSizeInBytes = 1 * 1024 * 1024; // 1MB
+
+      if (fileSizeInBytes > maxSizeInBytes) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: File size (${(fileSizeInBytes / 1024 / 1024).toFixed(2)}MB) exceeds maximum allowed size of 1MB.`,
+            },
+          ],
+        };
+      }
+
+      const base64Data = fileBuffer.toString("base64");
+      const fileName = params.name || path.basename(params.image_path);
+
+      // Validate file extension
+      const ext = path.extname(fileName).toLowerCase();
+      const allowedExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp"];
+      if (!allowedExtensions.includes(ext)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: Unsupported file format '${ext}'. Supported formats: PNG, JPG, GIF, BMP.`,
+            },
+          ],
+        };
+      }
+
       const requestBody: Record<string, unknown> = {
-        name: params.name,
-        file_data: params.file_data,
+        name: fileName,
+        file_data: base64Data,
       };
 
       if (params.folder_id) {
@@ -765,6 +930,537 @@ Returns file names, IDs, and URLs that can be used in campaign content.`,
         lines.push(`- **Type**: ${file.type}`);
         lines.push(`- **Size**: ${file.size} bytes`);
         lines.push("");
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_get_content",
+  {
+    title: "Get Campaign Content",
+    description: `Get the HTML and plain text content of a campaign.
+
+Returns the current content including:
+- html: The raw HTML content
+- plain_text: The plain text version
+- archive_html: The rendered HTML as it appears in the archive
+
+Use this to retrieve existing content before making modifications.`,
+    inputSchema: GetContentSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      const content = await makeApiRequest<{
+        html?: string;
+        plain_text?: string;
+        archive_html?: string;
+      }>(`/campaigns/${params.campaign_id}/content`);
+
+      const lines = ["# Campaign Content\n"];
+      lines.push(`**Campaign ID**: ${params.campaign_id}\n`);
+
+      if (content.html) {
+        lines.push("## HTML Content\n");
+        lines.push("```html");
+        lines.push(content.html);
+        lines.push("```\n");
+      }
+
+      if (content.plain_text) {
+        lines.push("## Plain Text Content\n");
+        lines.push("```");
+        lines.push(content.plain_text);
+        lines.push("```\n");
+      }
+
+      if (!content.html && !content.plain_text) {
+        lines.push("*No content has been set for this campaign yet.*");
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_delete_campaign",
+  {
+    title: "Delete Campaign",
+    description: `Delete a campaign from your Mailchimp account.
+
+WARNING: This action is permanent and cannot be undone.
+Only campaigns with status 'save' (draft) or 'paused' can be deleted.
+Sent campaigns cannot be deleted.`,
+    inputSchema: DeleteCampaignSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      await makeApiRequest(`/campaigns/${params.campaign_id}`, "DELETE");
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `# Campaign Deleted\n\nCampaign ${params.campaign_id} has been permanently deleted.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_schedule_campaign",
+  {
+    title: "Schedule Campaign",
+    description: `Schedule a campaign to be sent at a specific date and time.
+
+The campaign must have content set before scheduling.
+Time should be in ISO 8601 format with timezone (e.g., '2025-02-15T18:00:00+00:00').
+
+Optional features:
+- timewarp: Send based on each subscriber's timezone (paid plans only)
+- batch_delivery: Spread delivery over multiple batches to reduce server load
+
+Note: Schedule time must be at least 15 minutes in the future.`,
+    inputSchema: ScheduleCampaignSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      const requestBody: Record<string, unknown> = {
+        schedule_time: params.schedule_time,
+      };
+
+      if (params.timewarp !== undefined) {
+        requestBody.timewarp = params.timewarp;
+      }
+
+      if (params.batch_delivery) {
+        requestBody.batch_delivery = params.batch_delivery;
+      }
+
+      await makeApiRequest(
+        `/campaigns/${params.campaign_id}/actions/schedule`,
+        "POST",
+        requestBody
+      );
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `# Campaign Scheduled\n\n` +
+              `Campaign ${params.campaign_id} has been scheduled.\n\n` +
+              `**Scheduled time**: ${params.schedule_time}\n\n` +
+              `To cancel: mailchimp_unschedule_campaign(campaign_id="${params.campaign_id}")`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_unschedule_campaign",
+  {
+    title: "Unschedule Campaign",
+    description: `Cancel a scheduled campaign.
+
+This returns the campaign to 'save' (draft) status.
+You can then reschedule it or send it immediately.`,
+    inputSchema: UnscheduleCampaignSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      await makeApiRequest(
+        `/campaigns/${params.campaign_id}/actions/unschedule`,
+        "POST"
+      );
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `# Campaign Unscheduled\n\n` +
+              `Campaign ${params.campaign_id} has been unscheduled and returned to draft status.\n\n` +
+              `You can now:\n` +
+              `- Reschedule: mailchimp_schedule_campaign(campaign_id="${params.campaign_id}", schedule_time="...")\n` +
+              `- Send now: mailchimp_send_campaign(campaign_id="${params.campaign_id}")`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+// ============================================================================
+// Template Tools
+// ============================================================================
+
+/**
+ * Format a template for display
+ */
+function formatTemplate(template: MailchimpTemplate): string {
+  const lines: string[] = [];
+  lines.push(`## ${template.name}`);
+  lines.push(`- **ID**: ${template.id}`);
+  lines.push(`- **Type**: ${template.type}`);
+  lines.push(`- **Category**: ${template.category}`);
+  lines.push(`- **Drag & Drop**: ${template.drag_and_drop ? "Yes" : "No"}`);
+  lines.push(`- **Responsive**: ${template.responsive ? "Yes" : "No"}`);
+  lines.push(`- **Active**: ${template.active ? "Yes" : "No"}`);
+
+  if (template.date_created) {
+    lines.push(`- **Created**: ${new Date(template.date_created).toLocaleString()}`);
+  }
+
+  if (template.date_edited) {
+    lines.push(`- **Last Edited**: ${new Date(template.date_edited).toLocaleString()}`);
+  }
+
+  if (template.folder_id) {
+    lines.push(`- **Folder ID**: ${template.folder_id}`);
+  }
+
+  if (template.share_url) {
+    lines.push(`- **Share URL**: ${template.share_url}`);
+  }
+
+  return lines.join("\n");
+}
+
+server.registerTool(
+  "mailchimp_list_templates",
+  {
+    title: "List Templates",
+    description: `List templates in your Mailchimp account.
+
+Returns template IDs, names, types, and other details.
+Use this to find template IDs for creating campaigns.
+
+Template types:
+- user: Custom templates you've created
+- base: Mailchimp's basic templates
+- gallery: Pre-designed templates from Mailchimp`,
+    inputSchema: ListTemplatesSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      let endpoint = `/templates?count=${params.count}`;
+      if (params.type) {
+        endpoint += `&type=${params.type}`;
+      }
+      if (params.folder_id) {
+        endpoint += `&folder_id=${params.folder_id}`;
+      }
+
+      const data = await makeApiRequest<{ templates: MailchimpTemplate[] }>(endpoint);
+
+      const templates = data.templates || [];
+
+      if (templates.length === 0) {
+        return {
+          content: [{ type: "text", text: "No templates found." }],
+        };
+      }
+
+      const formatted = templates.map(formatTemplate).join("\n\n---\n\n");
+      return {
+        content: [{ type: "text", text: `# Mailchimp Templates (${templates.length})\n\n${formatted}` }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_get_template",
+  {
+    title: "Get Template",
+    description: `Get details of a specific template by ID.
+
+Returns template metadata including name, type, and settings.`,
+    inputSchema: GetTemplateSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      const template = await makeApiRequest<MailchimpTemplate>(
+        `/templates/${params.template_id}`
+      );
+
+      return {
+        content: [{ type: "text", text: `# Template Details\n\n${formatTemplate(template)}` }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_create_template",
+  {
+    title: "Create Template",
+    description: `Create a new template from HTML.
+
+The HTML must be valid and should include:
+- Mailchimp merge tags for required links (e.g., *|UNSUB|* for unsubscribe)
+- Proper HTML structure with doctype, html, head, and body tags
+
+For drag-and-drop editing support, use mc:edit attributes on editable sections.
+
+Example: <div mc:edit="body_content">Editable content here</div>`,
+    inputSchema: CreateTemplateSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      const requestBody: Record<string, unknown> = {
+        name: params.name,
+        html: params.html,
+      };
+
+      if (params.folder_id) {
+        requestBody.folder_id = params.folder_id;
+      }
+
+      const template = await makeApiRequest<MailchimpTemplate>(
+        "/templates",
+        "POST",
+        requestBody
+      );
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `# Template Created Successfully\n\n${formatTemplate(template)}\n\n` +
+              `**Use in campaign:**\n` +
+              `mailchimp_set_content(campaign_id="...", template_id=${template.id})`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_update_template",
+  {
+    title: "Update Template",
+    description: `Update an existing template.
+
+You can update:
+- name: The template name
+- html: The HTML content
+- folder_id: Move to a different folder
+
+Only provide the fields you want to change.`,
+    inputSchema: UpdateTemplateSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      const requestBody: Record<string, unknown> = {};
+
+      if (params.name) {
+        requestBody.name = params.name;
+      }
+      if (params.html) {
+        requestBody.html = params.html;
+      }
+      if (params.folder_id) {
+        requestBody.folder_id = params.folder_id;
+      }
+
+      if (Object.keys(requestBody).length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Error: You must provide at least one field to update (name, html, or folder_id).",
+            },
+          ],
+        };
+      }
+
+      const template = await makeApiRequest<MailchimpTemplate>(
+        `/templates/${params.template_id}`,
+        "PATCH",
+        requestBody
+      );
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `# Template Updated Successfully\n\n${formatTemplate(template)}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_delete_template",
+  {
+    title: "Delete Template",
+    description: `Delete a template from your Mailchimp account.
+
+WARNING: This action is permanent and cannot be undone.
+Only user-created templates can be deleted.`,
+    inputSchema: DeleteTemplateSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      await makeApiRequest(`/templates/${params.template_id}`, "DELETE");
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `# Template Deleted\n\nTemplate ${params.template_id} has been permanently deleted.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: handleApiError(error) }],
+      };
+    }
+  }
+);
+
+server.registerTool(
+  "mailchimp_get_template_default_content",
+  {
+    title: "Get Template Default Content",
+    description: `Get the default/editable content sections of a template.
+
+This shows the editable regions defined in the template with their default content.
+Useful for understanding what sections can be customized when using the template.
+
+Returns section names and their HTML content.`,
+    inputSchema: GetTemplateDefaultContentSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (params) => {
+    try {
+      const content = await makeApiRequest<{ sections?: Record<string, string> }>(
+        `/templates/${params.template_id}/default-content`
+      );
+
+      const lines = ["# Template Default Content\n"];
+      lines.push(`**Template ID**: ${params.template_id}\n`);
+
+      if (content.sections && Object.keys(content.sections).length > 0) {
+        lines.push("## Editable Sections\n");
+        for (const [sectionName, sectionContent] of Object.entries(content.sections)) {
+          lines.push(`### ${sectionName}\n`);
+          lines.push("```html");
+          lines.push(sectionContent);
+          lines.push("```\n");
+        }
+      } else {
+        lines.push("*No editable sections defined in this template.*");
       }
 
       return {
