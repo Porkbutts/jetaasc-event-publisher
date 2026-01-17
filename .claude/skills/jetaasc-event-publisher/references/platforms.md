@@ -82,32 +82,28 @@ Use the returned `file.id` in the blog post.
 ### Calendar
 JETAASC Public Calendar
 
-### API Setup Required
-1. Create a Google Cloud project
-2. Enable Google Calendar API
-3. Create OAuth 2.0 credentials or service account
-4. Share JETAASC Public Calendar with the service account email
+### MCP Tool
+Use `gcal_create_event` from the Google Calendar MCP server.
 
-### API Endpoint
-```
-POST https://www.googleapis.com/calendar/v3/calendars/{calendarId}/events
-```
+### Required Parameters
+| Parameter | Description |
+|-----------|-------------|
+| `summary` | Event title |
+| `description` | Event details (include cost and RSVP link) |
+| `location` | Venue address |
+| `start_time` | ISO8601 timestamp (e.g., `2026-02-15T18:00:00-08:00`) |
+| `end_time` | ISO8601 timestamp |
+| `timezone` | (Optional) Timezone if not included in timestamp (e.g., `America/Los_Angeles`) |
 
-### Event Object Structure
-```json
-{
-  "summary": "Event Title",
-  "location": "Venue Address",
-  "description": "Event details and RSVP link",
-  "start": {
-    "dateTime": "2026-02-15T18:00:00-08:00",
-    "timeZone": "America/Los_Angeles"
-  },
-  "end": {
-    "dateTime": "2026-02-15T21:00:00-08:00",
-    "timeZone": "America/Los_Angeles"
-  }
-}
+### Example
+```
+gcal_create_event(
+  summary: "JETAASC Boba Banter",
+  description: "Join us for boba!\n\nCost: Free\nRSVP: https://forms.gle/...",
+  location: "Half & Half Tea Express, Los Angeles",
+  start_time: "2026-02-22T15:00:00-08:00",
+  end_time: "2026-02-22T17:00:00-08:00"
+)
 ```
 
 ---

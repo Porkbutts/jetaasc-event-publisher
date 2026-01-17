@@ -64,9 +64,7 @@ Steps:
 
 ### Google Calendar
 
-Add event to JETAASC Public Calendar. See [references/platforms.md](references/platforms.md) for API details.
-
-Required: Google Calendar API credentials configured.
+Create Google Calendar event using `gcal_create_event` MCP tool. See [references/platforms.md](references/platforms.md) for parameters.
 
 ### Discord
 
@@ -81,6 +79,6 @@ Provide formatted content for manual posting. See [references/platforms.md](refe
 | Platform | Method | Status |
 |----------|--------|--------|
 | Wix Blog | Wix MCP | Ready |
-| Google Calendar | API | Requires setup |
 | Discord | Discord MCP | Ready |
+| Google Calendar | Google Calendar MCP | Ready |
 | Facebook | Manual | Copy/paste |
