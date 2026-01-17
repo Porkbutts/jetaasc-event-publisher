@@ -103,7 +103,7 @@ An MCP server for managing Google Calendar events using service account authenti
      "mcpServers": {
        "google-calendar": {
          "command": "node",
-         "args": ["mcp-servers/google-calendar-mcp-server/dist/index.js"],
+         "args": ["/path/to/mcp-servers/google-calendar-mcp-server/dist/index.js"],
          "env": {
            "GOOGLE_SERVICE_ACCOUNT_KEY_PATH": "/path/to/service-account-key.json",
            "GOOGLE_CALENDAR_ID": "your-calendar-id@group.calendar.google.com"
