@@ -25,7 +25,7 @@ A Claude Code skill that automates event publishing workflow:
 
 ### Discord Events MCP Server
 
-Located in `discord-events-mcp-server/`
+Located in `mcp-servers/discord-events-mcp-server/`
 
 An MCP server for managing Discord Guild Scheduled Events.
 
@@ -38,7 +38,7 @@ An MCP server for managing Discord Guild Scheduled Events.
 
 ### Google Calendar MCP Server
 
-Located in `google-calendar-mcp-server/`
+Located in `mcp-servers/google-calendar-mcp-server/`
 
 An MCP server for managing Google Calendar events using service account authentication.
 
@@ -60,7 +60,7 @@ An MCP server for managing Google Calendar events using service account authenti
 
 5. Build the server:
    ```bash
-   cd discord-events-mcp-server
+   cd mcp-servers/discord-events-mcp-server
    npm install
    npm run build
    ```
@@ -71,7 +71,7 @@ An MCP server for managing Google Calendar events using service account authenti
      "mcpServers": {
        "discord-events": {
          "command": "node",
-         "args": ["/path/to/discord-events-mcp-server/dist/index.js"],
+         "args": ["/path/to/mcp-servers/discord-events-mcp-server/dist/index.js"],
          "env": {
            "DISCORD_BOT_TOKEN": "your-bot-token",
            "DISCORD_GUILD_ID": "your-guild-id"
@@ -92,7 +92,7 @@ An MCP server for managing Google Calendar events using service account authenti
 
 6. Build the server:
    ```bash
-   cd google-calendar-mcp-server
+   cd mcp-servers/google-calendar-mcp-server
    npm install
    npm run build
    ```
@@ -103,7 +103,7 @@ An MCP server for managing Google Calendar events using service account authenti
      "mcpServers": {
        "google-calendar": {
          "command": "node",
-         "args": ["google-calendar-mcp-server/dist/index.js"],
+         "args": ["mcp-servers/google-calendar-mcp-server/dist/index.js"],
          "env": {
            "GOOGLE_SERVICE_ACCOUNT_KEY_PATH": "/path/to/service-account-key.json",
            "GOOGLE_CALENDAR_ID": "your-calendar-id@group.calendar.google.com"

@@ -6,7 +6,7 @@
     },
     "discord-events": {
       "command": "node",
-      "args": ["discord-events-mcp-server/dist/index.js"],
+      "args": ["mcp-servers/discord-events-mcp-server/dist/index.js"],
       "env": {
         "DISCORD_BOT_TOKEN": "",
         "DISCORD_GUILD_ID": ""
@@ -14,7 +14,7 @@
     },
     "google-calendar": {
       "command": "node",
-      "args": ["google-calendar-mcp-server/dist/index.js"],
+      "args": ["mcp-servers/google-calendar-mcp-server/dist/index.js"],
       "env": {
         "GOOGLE_SERVICE_ACCOUNT_KEY_PATH": "",
         "GOOGLE_CALENDAR_ID": ""
