@@ -1,2 +1,10 @@
+# MCP config with secrets
 .mcp.json
+
+# Service account keys
 jetaasc-event-publisher-2b9e2ad9c98a.json
+*.json.key
+
+# Dependencies and build output
+node_modules/
+dist/
