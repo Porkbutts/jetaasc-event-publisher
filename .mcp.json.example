@@ -19,6 +19,13 @@
         "GOOGLE_SERVICE_ACCOUNT_KEY_PATH": "",
         "GOOGLE_CALENDAR_ID": ""
       }
+    },
+    "mailchimp": {
+      "command": "node",
+      "args": ["mailchimp-mcp-server/dist/index.js"],
+      "env": {
+        "MAILCHIMP_API_KEY": ""
+      }
     }
   }
 }
